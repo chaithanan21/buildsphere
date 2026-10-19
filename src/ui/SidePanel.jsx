@@ -201,7 +201,6 @@ function Inspector({ selected }) {
           <NumberField label="กว้าง (ม.)" value={selected.w} onCommit={(w) => patch({ w: snapDim(clampDim('w', w)) })} />
           <NumberField label="ยาว (ม.)" value={selected.d} onCommit={(d) => patch({ d: snapDim(clampDim('d', d)) })} />
           <NumberField label="สูง (ม.)" value={selected.h} onCommit={(h) => patch({ h: snapDim(clampDim('h', h)) })} />
-          <button type="button" onClick={() => patch({ rot: (selected.rot || 0) + Math.PI / 2 })}>หมุน 90°</button>
         </>
       )}
       {selected.type === 'roof' && (
@@ -219,10 +218,16 @@ function Inspector({ selected }) {
           <FinishField value={studio.project.roof.material} onChange={(material) => patch({ material })} />
         </>
       )}
-      {(selected.type === 'door' || selected.type === 'window' || selected.type === 'stair' || selected.type === 'device' || selected.type === 'light' || selected.type === 'conduit' || selected.type === 'junction') && (
-        <p className="meta">{titleOf(selected)}</p>
+      {(selected.type === 'door' || selected.type === 'window') && (
+        <p className="meta">ลากบนโมเดลเพื่อเลื่อนไปตามผนัง กว้าง {Number(selected.width).toFixed(2)} ม.</p>
+      )}
+      {(selected.type === 'stair' || selected.type === 'device' || selected.type === 'light' || selected.type === 'conduit' || selected.type === 'junction') && (
+        <p className="meta">{selected.type === 'device' || selected.type === 'light' || selected.type === 'junction' ? 'ลากบนโมเดลเพื่อย้าย' : titleOf(selected)}</p>
       )}
       <div className="row-actions">
+        {canRotate(selected) && (
+          <button type="button" onClick={() => patch({ rot: ((selected.rot || 0) + Math.PI / 2) % (Math.PI * 2) })}>หมุน 90°</button>
+        )}
         {selected.type !== 'roof' && selected.type !== 'door' && selected.type !== 'window' && (
           <button type="button" onClick={() => studio.duplicate(selected.id)}>ทำซ้ำ</button>
         )}
@@ -261,6 +266,12 @@ function NumberField({ label, value, onCommit, step = '0.05' }) {
       />
     </label>
   )
+}
+
+function canRotate(element) {
+  if (!element) return false
+  if (element.type === 'furniture' || element.type === 'device' || element.type === 'column') return true
+  return element.type === 'engineering' && element.x1 == null
 }
 
 function titleOf(element) {

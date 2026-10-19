@@ -211,22 +211,33 @@ function wallParts(length, height, openings) {
 function addOpening(group, wall, opening) {
   const width = Math.max(0.2, opening.end - opening.start)
   const height = Math.max(0.2, opening.top - opening.sill)
+  const center = (opening.start + opening.end) / 2
+  const holder = new THREE.Group()
+  holder.position.set(0, 0, center)
+  holder.userData = { id: opening.id, type: opening.type, levelId: opening.levelId, wallId: wall.id }
+  const pickMaterial = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
+  pickMaterial.userData.owned = true
+  const pick = new THREE.Mesh(new THREE.BoxGeometry(wall.thickness + 0.12, height, width), pickMaterial)
+  pick.position.set(0, opening.sill + height / 2, 0)
+  holder.add(pick)
   if (opening.type === 'door') {
     const pivot = new THREE.Group()
-    pivot.position.set(wall.thickness / 2 + 0.02, opening.sill, opening.start + 0.04)
+    pivot.position.set(wall.thickness / 2 + 0.02, opening.sill, opening.start + 0.04 - center)
     pivot.rotation.y = -0.7
     const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.04, height - 0.08, width - 0.08), wood())
     leaf.position.set(0, height / 2, (width - 0.08) / 2)
     leaf.castShadow = true
     pivot.add(leaf)
-    group.add(pivot)
+    holder.add(pivot)
+    group.add(holder)
     return
   }
   const pane = new THREE.Mesh(new THREE.BoxGeometry(0.02, height - 0.08, width - 0.08), glass())
-  pane.position.set(0, opening.sill + height / 2, (opening.start + opening.end) / 2)
+  pane.position.set(0, opening.sill + height / 2, 0)
   const frame = new THREE.Mesh(new THREE.BoxGeometry(wall.thickness + 0.02, 0.06, width), wood())
-  frame.position.set(0, opening.sill + 0.03, (opening.start + opening.end) / 2)
-  group.add(pane, frame)
+  frame.position.set(0, opening.sill + 0.03, 0)
+  holder.add(pane, frame)
+  group.add(holder)
 }
 
 function buildSlab(slab, level) {
@@ -255,6 +266,7 @@ function buildColumn(column, level) {
     structureMaterial(column.material),
   )
   mesh.position.set(column.x, level.elevation + level.height / 2, column.z)
+  mesh.rotation.y = column.rot || 0
   mesh.castShadow = true
   mesh.receiveShadow = true
   mesh.userData = { id: column.id, type: 'column', levelId: column.levelId }

@@ -3,7 +3,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { ENGINEERING } from '../lib/catalog.js'
 import { ceilingY, elementsFromDraw, engineeringElement, furnitureElement, makeColumn, placeOpening } from '../lib/assemble.js'
-import { focusOf, levelById, normalizeRect, pointSegmentDistance, snapPoint, wallLength } from '../lib/geometry.js'
+import { alongWall, focusOf, levelById, normalizeRect, pointSegmentDistance, snapPoint, wallLength } from '../lib/geometry.js'
 import { uid } from '../lib/ids.js'
 import { ENGINEERING_LIMIT, resizeFromEdge, samePose } from '../lib/resize.js'
 import { buildWalkPath } from '../lib/walk.js'
@@ -26,6 +26,12 @@ function draws(tool) {
 
 function places(tool) {
   return Boolean(tool) && (PLACE_TOOLS.has(tool.id) || engineeringMode(tool) === 'point')
+}
+
+function canRotatePiece(item) {
+  if (!item) return false
+  if (item.type === 'furniture' || item.type === 'device' || item.type === 'column') return true
+  return item.type === 'engineering' && item.x1 == null
 }
 
 export default function Viewport() {
@@ -104,7 +110,7 @@ export default function Viewport() {
     const look = { active: false, yaw: 0, pitch: 0 }
     const glance = { x: 0, y: 0, armed: false }
     const aim = new THREE.Vector3()
-    const move = { id: null }
+    const move = { id: null, opening: false, t: null, origin: null }
     const sizing = { id: null, axis: null, sign: 1, base: null, dims: null, pos: null }
     let flying = null
     let recorder = null
@@ -157,6 +163,59 @@ export default function Viewport() {
 
     function elementById(id) {
       return studioRef.current.project.elements.find((item) => item.id === id)
+    }
+
+    function canDrag(hit) {
+      if (!hit) return false
+      if (hit.type === 'door' || hit.type === 'window') return true
+      if (['furniture', 'column', 'light', 'device', 'junction', 'label'].includes(hit.type)) return true
+      return hit.type === 'engineering' && hit.x1 == null
+    }
+
+    function beginDrag(hit) {
+      move.id = hit.id
+      move.opening = hit.type === 'door' || hit.type === 'window'
+      move.origin = move.opening ? elementById(hit.id)?.t ?? null : null
+      move.t = move.origin
+      canvas.style.cursor = 'grabbing'
+    }
+
+    function pointOnWall(wall, clientX, clientY) {
+      clientPointer(clientX, clientY)
+      const dx = wall.x2 - wall.x1
+      const dz = wall.z2 - wall.z1
+      const length = Math.hypot(dx, dz) || 1
+      const normal = new THREE.Vector3(dz / length, 0, -dx / length)
+      const plane = new THREE.Plane(normal, -(normal.x * wall.x1 + normal.z * wall.z1))
+      const hit = new THREE.Vector3()
+      if (!raycaster.ray.intersectPlane(plane, hit)) return planePoint(clientX, clientY)
+      return { x: hit.x, z: hit.z }
+    }
+
+    function openingT(id, clientX, clientY) {
+      const opening = elementById(id)
+      const wall = opening && elementById(opening.wallId)
+      if (!opening || !wall) return null
+      const point = pointOnWall(wall, clientX, clientY)
+      if (!point) return null
+      const length = wallLength(wall)
+      const half = (opening.width || 0.2) / 2
+      const margin = 0.05
+      if (length < opening.width + margin * 2) return 0.5
+      const center = Math.min(length - half - margin, Math.max(half + margin, alongWall(wall, point.x, point.z)))
+      return center / length
+    }
+
+    function previewOpening(id, t) {
+      const project = studioRef.current.project
+      const preview = {
+        ...project,
+        elements: project.elements.map((item) => (item.id === id ? { ...item, t } : item)),
+      }
+      clearContent(content)
+      content.add(buildContent(preview))
+      applyFilters()
+      highlight()
     }
 
     function nearestWall(point, levelId) {
@@ -627,7 +686,7 @@ export default function Viewport() {
       const toolId = app.tool.id
       if (toolId === 'select') {
         const hit = pick(event.clientX, event.clientY)
-        const movable = hit && (['furniture', 'column', 'light', 'device', 'junction', 'label'].includes(hit.type) || (hit.type === 'engineering' && hit.x1 == null))
+        const movable = canDrag(hit)
         if (lookingInside() && !movable) {
           glance.armed = true
           glance.x = event.clientX
@@ -642,7 +701,7 @@ export default function Viewport() {
         }
         event.stopPropagation()
         app.setSelection(hit.id)
-        if (movable) move.id = hit.id
+        if (movable) beginDrag(hit)
         return
       }
       event.stopPropagation()
@@ -660,6 +719,19 @@ export default function Viewport() {
         draft.conduit.push({ x: point.x, y, z: point.z })
         previewConduit()
         return
+      }
+      if (toolId === 'door' || toolId === 'window' || toolId === 'outlet' || toolId === 'switch') {
+        const hit = pick(event.clientX, event.clientY)
+        const grabbed =
+          (toolId === 'door' && hit?.type === 'door') ||
+          (toolId === 'window' && hit?.type === 'window') ||
+          ((toolId === 'outlet' || toolId === 'switch') && hit?.type === 'device')
+        if (grabbed) {
+          app.setSelection(hit.id)
+          app.setTool({ id: 'select', kind: null })
+          beginDrag(hit)
+          return
+        }
       }
       if (places(app.tool) || toolId === 'door' || toolId === 'window' || toolId === 'outlet' || toolId === 'switch') {
         placeAt(point, event.clientX, event.clientY)
@@ -699,11 +771,19 @@ export default function Viewport() {
         if (dims) previewResize(dims)
         return
       }
+      if (move.opening && move.id) {
+        const t = openingT(move.id, event.clientX, event.clientY)
+        if (t == null || Math.abs(t - move.t) < 0.002) return
+        move.t = t
+        previewOpening(move.id, t)
+        return
+      }
       const point = planePoint(event.clientX, event.clientY)
       if (!point) return
       if (!move.id && studioRef.current.tool.id === 'select') {
         const grip = pickGizmo(event.clientX, event.clientY)
-        canvas.style.cursor = grip ? resizeCursor(grip.object.userData.axis) : ''
+        if (grip) canvas.style.cursor = resizeCursor(grip.object.userData.axis)
+        else canvas.style.cursor = canDrag(pick(event.clientX, event.clientY)) ? 'grab' : ''
       }
       if (move.id) {
         const object = findOwned(content, move.id)
@@ -733,9 +813,16 @@ export default function Viewport() {
         return
       }
       if (move.id) {
-        const object = findOwned(content, move.id)
-        if (object) studioRef.current.patch(move.id, { x: object.position.x, z: object.position.z })
+        if (move.opening) {
+          if (move.t != null && Math.abs(move.t - move.origin) > 0.002) studioRef.current.patch(move.id, { t: move.t })
+        } else {
+          const object = findOwned(content, move.id)
+          if (object) studioRef.current.patch(move.id, { x: object.position.x, z: object.position.z })
+        }
         move.id = null
+        move.opening = false
+        move.t = null
+        move.origin = null
         canvas.style.cursor = ''
         return
       }
@@ -1070,6 +1157,9 @@ export default function Viewport() {
         draft.anchor = null
         draft.conduit = []
         move.id = null
+        move.opening = false
+        move.t = null
+        move.origin = null
         if (sizing.id) {
           const object = findOwned(content, sizing.id)
           if (object) object.scale.set(1, 1, 1)
@@ -1164,6 +1254,15 @@ export default function Viewport() {
     event.currentTarget.addEventListener('pointercancel', stop, { once: true })
   }
 
+  const selectedPiece = studio.project.elements.find((item) => item.id === studio.selection)
+  const rotatable = canRotatePiece(selectedPiece) && studio.presentation !== 'walk' && studio.presentation !== 'play'
+
+  function rotateSelected() {
+    const item = studio.project.elements.find((piece) => piece.id === studio.selection)
+    if (!canRotatePiece(item)) return
+    studio.patch(item.id, { rot: ((item.rot || 0) + Math.PI / 2) % (Math.PI * 2) })
+  }
+
   return (
     <div className="viewport" ref={wrapRef}>
       <canvas ref={canvasRef} />
@@ -1213,6 +1312,11 @@ export default function Viewport() {
       <div className="compass" ref={compassRef} title="ทิศ">
         <span>น</span>
       </div>
+      {rotatable && (
+        <button type="button" className="spin-piece" onClick={rotateSelected}>
+          หมุน 90°
+        </button>
+      )}
       <div className="look-pad" aria-label="หมุนมุมมอง">
         <button type="button" className="look-up" title="มองขึ้น" aria-label="มองขึ้น" onPointerDown={(event) => holdLook(event, 0, 0.1)}>↑</button>
         <button type="button" className="look-left" title="หมุนซ้าย" aria-label="หมุนซ้าย" onPointerDown={(event) => holdLook(event, 0.14, 0)}>←</button>

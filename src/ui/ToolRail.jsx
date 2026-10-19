@@ -30,9 +30,21 @@ export default function ToolRail() {
     studio.notify(type === 'flat' ? 'มุงหลังคาแบนแล้ว สลับภายนอกหรือภายในได้' : 'มุงหลังคาจั่วแล้ว สลับภายนอกหรือภายในได้')
   }
 
+  const selectTool = TOOLS.find((tool) => tool.id === 'select')
+
   return (
     <aside className="rail">
       <p className="rail-kicker">ลากเครื่องมือลงบนที่ดิน</p>
+      <div className="tool-grid">
+        <button
+          type="button"
+          className={studio.tool.id === 'select' ? 'on' : ''}
+          onClick={() => arm(selectTool)}
+        >
+          <span>เลือก</span>
+          <kbd>V</kbd>
+        </button>
+      </div>
       {PHASES.map((phase) => (
         <section key={phase.id}>
           <h2>{phase.name}</h2>

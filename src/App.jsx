@@ -74,9 +74,15 @@ export default function App() {
 
   const hint = TOOLS.find((tool) => tool.id === studio.tool.id && (tool.kind || null) === (studio.tool.kind || null))
   const selectedPiece = studio.project.elements.find((item) => item.id === studio.selection)
-  const status = selectedPiece?.type === 'furniture' || (selectedPiece?.type === 'engineering' && selectedPiece.x1 == null)
-    ? 'ลากตัวชิ้นงานหรือจุดกลางเพื่อย้าย · ขอบส้มปรับกว้าง · ขอบเขียวปรับยาว'
-    : hint?.hint || 'เลือกชิ้นงานบนโมเดล'
+  const status = selectedPiece?.type === 'door' || selectedPiece?.type === 'window'
+    ? 'ลากไปตามผนังเพื่อเลื่อนช่องเปิด'
+    : selectedPiece?.type === 'furniture' || (selectedPiece?.type === 'engineering' && selectedPiece.x1 == null)
+    ? 'ลากเพื่อย้าย · ขอบส้มปรับกว้าง · ขอบเขียวปรับยาว · ปุ่มหมุน 90°'
+    : selectedPiece?.type === 'device' || selectedPiece?.type === 'column'
+      ? 'ลากเพื่อย้าย · ปุ่มหมุน 90°'
+    : selectedPiece?.type === 'light' || selectedPiece?.type === 'junction'
+      ? 'ลากเพื่อย้ายตำแหน่ง'
+      : hint?.hint || 'เลือกชิ้นงานบนโมเดล'
 
   return (
     <div className={`app ${studio.tool.id === 'select' ? '' : 'drawing'}`}>
